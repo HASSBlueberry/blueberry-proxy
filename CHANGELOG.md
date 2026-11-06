@@ -43,3 +43,13 @@ All notable changes to this project will be documented in this file. This change
 
 [Unreleased]: https://git.crit.rip/BlueberryFaygo/blueberryfaygo/compare/0.1.0...HEAD
 [0.1.0]: https://git.crit.rip/BlueberryFaygo/blueberryfaygo/releases/tag/0.1.0
+
+## 0.2.0
+
+Added the local and HA Ingress statistics dashboard, sanitized live WebSocket
+flow, bounded DNS domain/client rankings, persisted blocking controls, exact
+domain allow/block rules, and DNS cache clearing. Added the independent HA
+frontend integration and automatically registered management card. Query
+history now returns the latest retained entries first, and runtime statistics
+are excluded from saved configuration. WebSocket delivery uses bounded queues,
+control frames, and shared HTTP access for the dashboard.

@@ -1,4 +1,4 @@
-(defproject blueberryProxy "0.1.0-SNAPSHOT"
+(defproject blueberryProxy "0.2.0-SNAPSHOT"
   :description "Home network DNS and HTTP proxy with reverse DNS, refreshable
                 blocklists, GraalJS transforms, LAN discovery and Home
                 Assistant add-on packaging."
@@ -9,6 +9,9 @@
                  [org.clojure/data.json "2.5.1"]
                  [org.graalvm.polyglot/polyglot "25.3.4.1"]
                  [org.graalvm.polyglot/js "25.3.4.1" :extension "pom"]]
+  :test-selectors {:default (complement :integration)
+                   :integration :integration
+                   :all (constantly true)}
   :main ^:skip-aot blueberryProxy
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all

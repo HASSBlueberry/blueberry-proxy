@@ -16,13 +16,14 @@
    :transformers []
    :ptr-records []
    :blocklists []
-   :query-log-size 1000})
+   :query-log-size 1000
+   :blocking-enabled true})
 
 (defn- read-state [path]
   (let [f (io/file path)]
     (if (.exists f)
       (try
-        (merge default-state (edn/read-string (slurp f)))
+        (merge default-state (dissoc (edn/read-string (slurp f)) :stats :query-log))
         (catch Exception e
           (println "storage: cannot read" path "-" (.getMessage e))
           default-state))
@@ -34,7 +35,7 @@
   (let [f (io/file path)
         tmp (io/file (str path ".tmp"))]
     (io/make-parents f)
-    (spit tmp (pr-str (dissoc state :query-log)))
+    (spit tmp (pr-str (dissoc state :query-log :stats)))
     (Files/move (.toPath tmp) (.toPath f)
                 (into-array StandardCopyOption
                             [StandardCopyOption/REPLACE_EXISTING]))
@@ -76,7 +77,8 @@
        (filter #(match? % qname))
        (sort-by (fn [r]
                   [(case (rule-type r) :exact 0 :suffix 1 :regex 2)
-                   (- (count (rule-value r)))]))
+                   (- (count (rule-value r)))
+                   (- (if (number? (:priority r)) (long (:priority r)) 0))]))
        first))
 
 
@@ -113,31 +115,56 @@
   (when (and (seq rules) (empty? (:rules @store)))
     (doseq [r rules] (add-rule! store r))))
 
+(defn- count-key [counts value limit]
+  (if (or (contains? counts value) (< (count counts) limit))
+    (update counts value (fnil inc 0))
+    counts))
+
 (defn log-query! [store entry]
-  (swap! store
-         (fn [s]
-           (let [size (or (:query-log-size s) 1000)
-                 log (conj (vec (:query-log s))
-                           (assoc entry :ts (System/currentTimeMillis)))
-                 s (-> s
-                       (assoc :query-log (if (> (count log) size)
-                                           (subvec log (- (count log) size))
-                                           log))
-                       (update :stats update-in [:queries] (fnil inc 0))
-                       (update :stats update-in [:clients (str (:client entry))]
-                               (fnil inc 0)))]
-             (if-let [a (:action entry)]
-               (update s :stats update-in [:actions (keyword a)] (fnil inc 0))
-               s))))
+  (let [entry (assoc entry :ts (System/currentTimeMillis))
+        action (keyword (:action entry))
+        blocked? (contains? #{:blackhole :blocklist} action)
+        failed? (contains? #{:upstream-failed :forward-failed} action)
+        domain (-> (str (:qname entry)) str/lower-case (str/replace #"\.$" ""))]
+    (swap! store
+           (fn [s]
+             (let [size (or (:query-log-size s) 1000)
+                   log (conj (vec (:query-log s)) entry)]
+               (cond-> (-> s
+                           (assoc :query-log (vec (take-last size log)))
+                           (update-in [:stats :queries] (fnil inc 0))
+                           (update-in [:stats (cond blocked? :blocked failed? :errors :else :allowed)] (fnil inc 0))
+                           (update-in [:stats :actions action] (fnil inc 0))
+                           (update-in [:stats :clients] count-key (str (:client entry)) 4096)
+                           (update-in [:stats :domains] count-key domain 10000))
+                 blocked? (update-in [:stats :blocked-domains] count-key domain 10000)))))
+    (when-let [publish (::on-query (meta store))]
+      (publish (assoc entry :type "dns" :blocked blocked?))))
   nil)
 
 (defn recent-queries
-  "Newest-first slice of the query log."
+  "Newest-first slice of the bounded query log."
   [store n]
-  (vec (reverse (take (or n 100) (:query-log @store)))))
+  (vec (take (max 0 (or n 100)) (reverse (:query-log @store)))))
 
 (defn stats [store]
-  (or (:stats @store) {}))
+  (dissoc (or (:stats @store) {}) :domains :blocked-domains))
+
+(defn dashboard-stats [store]
+  (let [s @store
+        stats (:stats s)
+        rank (fn [field label]
+               (->> (get stats field {})
+                    (sort-by (fn [[value count]] [(- count) value]))
+                    (take 15)
+                    (mapv (fn [[value count]] {label value :queries count}))))]
+    {:queries (get stats :queries 0) :allowed (get stats :allowed 0)
+     :blocked (get stats :blocked 0) :errors (get stats :errors 0)
+     :actions (:actions stats {}) :blocking-enabled (:blocking-enabled s true)
+     :top-domains (rank :domains :domain) :top-blocked (rank :blocked-domains :domain)
+     :top-clients (rank :clients :client)
+     :period "since restart" :domain-limit 10000 :client-limit 4096
+     :tracked-domains (count (:domains stats)) :tracked-clients (count (:clients stats))}))
 
 (defn top-clients
   "Clients ranked by query count - device discovery helper."
@@ -218,3 +245,8 @@
         (contains? entries candidate) true
         (str/includes? candidate ".") (recur (subs candidate (inc (.indexOf ^String candidate "."))))
         :else false))))
+
+(defn set-blocking! [store enabled]
+  (swap! store assoc :blocking-enabled (boolean enabled))
+  (persist-current! store)
+  (:blocking-enabled @store))

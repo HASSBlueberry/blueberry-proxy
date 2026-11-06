@@ -33,6 +33,7 @@
    :proxy-tls-common-name "blueberryProxy"
    :proxy-tls-sans []
    :websocket-port 8055
+   :ingress-port 8056
    :blocklist-refresh-hours 24
    :blocklist-action :blackhole
    :data-dir "data"
@@ -260,13 +261,17 @@
         (respond-rcode msg 1)
 
         :else
-        (let [rule (storage/find-rule (storage/list-rules store) qname)
+        (let [rule (storage/find-rule
+                     (if (:blocking-enabled @store true)
+                       (storage/list-rules store)
+                       (remove #(= :blackhole (keyword (:action %))) (storage/list-rules store)))
+                     qname)
               reverse-ip (when (= qtype :PTR) (reverse-name->ip qname))
               ptr-record (when reverse-ip
                            (first (filter #(= (str/lower-case (str (:ip %)))
                                               (str/lower-case reverse-ip))
                                           (storage/list-ptr-records store))))
-              blocked? (and (contains? #{:A :AAAA :ANY} qtype)
+              blocked? (and (:blocking-enabled @store true) (not= :passthrough (some-> rule :action keyword)) (contains? #{:A :AAAA :ANY} qtype)
                             (storage/blocklisted? store qname))
               action-key (cond blocked? :blocklisted ptr-record :ptr
                                :else (some-> rule :action keyword))]
@@ -332,7 +337,7 @@
                                            [(prims/opt-rr (:class req-opt))]
                                            (filterv #(not= :OPT (:type %))
                                                     (:additional parsed))))))
-                (do (when rule (action :upstream-failed rule nil))
+                (do (action :upstream-failed rule nil)
                     (respond-rcode msg 2))))))))))
 
 
@@ -370,7 +375,15 @@
                                         :sans (:proxy-tls-sans config)}))
         blocklist-scheduler (blocklists/start-scheduler store (:blocklist-refresh-hours config) log)
         ws-listener (websocket/start {:port (:websocket-port config)
-                                      :bind (:proxy-bind config)})
+                                      :bind (:proxy-bind config)
+                                      :http-host (if (contains? #{"0.0.0.0" "::"} (:admin-bind config)) "127.0.0.1" (:admin-bind config))
+                                      :http-port (:admin-port config)})
+        ingress-listener (websocket/start {:port (:ingress-port config 8056)
+                                            :bind "0.0.0.0" :allowed-clients #{"172.30.32.2"}
+                                            :http-host (if (contains? #{"0.0.0.0" "::"} (:admin-bind config)) "127.0.0.1" (:admin-bind config))
+                                            :http-port (:admin-port config)})
+        publish (fn [event] ((:publish ws-listener) event) ((:publish ingress-listener) event))
+        _ (alter-meta! store assoc :storage.storage/on-query publish)
         handler (make-handler {:store store :up-store up-store
                                :config config :log log})
         proxy-listener (proxy/start {:port (:proxy-port config)
@@ -378,7 +391,7 @@
                                      :tls-context (when (:proxy-tls-enabled config) tls-context)
                                      :listeners (storage/list-proxy-listeners store)
                                      :maps #(proxy-maps store)
-                                     :on-event (:publish ws-listener)
+                                     :on-event publish
                                      :log log})
         listeners
         [(udp/start {:port (:dns-port config)
@@ -400,6 +413,7 @@
                        :log log})
          proxy-listener
          ws-listener
+         ingress-listener
          blocklist-scheduler]]
     (log {:event :start
           :dns (str (:bind config) ":" (:dns-port config))

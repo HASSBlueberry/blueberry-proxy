@@ -1,5 +1,5 @@
 name: BlueberryProxy
-version: 0.1.0
+version: 0.2.0
 slug: blueberry_proxy
 description: Home network DNS, blocklists, reverse proxy maps and device research tools
 url: https://git.crit.rip/BlueberryFaygo/BlueberryProxy
@@ -12,6 +12,11 @@ startup: application
 init: false
 # required so the proxy can answer LAN clients on port 53
 host_network: true
+ingress: true
+ingress_port: 8056
+ingress_stream: true
+panel_icon: mdi:shield-check
+webui: http://[HOST]:8055/
 options:
   dns_port: 53
   bind: 0.0.0.0
@@ -99,6 +104,7 @@ schema:
       action: match(static|blackhole|redirect|upstream|passthrough)
       value?: str
       ttl?: int
+      priority?: int
   proxy_maps:
     - id?: str
       host?: str
@@ -121,6 +127,7 @@ schema:
       ip: str
       hostname: str
       ttl?: int
+      priority?: int
   transformers:
     - id?: str
       type: str

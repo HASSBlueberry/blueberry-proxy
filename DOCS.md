@@ -146,3 +146,49 @@ GraalJS 25 runtime.
 3. `GET /scan?cidr=...` merges the ARP table (MAC addresses) with a ping sweep.
 4. Add `static` rules to pin cloud endpoints at a local mock, or `blackhole`
    rules to force devices into local-only mode.
+
+## Dashboard and Home Assistant card
+
+Version 0.2 serves a statistics dashboard at `http://HOST:8055/`, using the
+configured `websocket_port` when changed. It includes a same-origin WebSocket
+at `/events`, DNS allowed/blocked/error totals, domain/client rankings, cache
+statistics, a bounded live-flow table, domain rules, blocking controls, and
+proxy map switches. The HA app's Open Web UI button uses Ingress on a separate
+port 8056, restricted to the Supervisor gateway IP `172.30.32.2`.
+
+The local dashboard port also forwards management API calls to the configured
+admin listener. It is an unauthenticated LAN management surface and belongs on
+a trusted network. The existing port 8054 admin API continues to work. The new
+HTTP facade limits uploads to 1 MiB and uses one request per connection.
+
+`GET /stats` returns totals, top domains, top blocked domains, top clients,
+tracking limits, blocking state, and DNS cache counters. Counters reset on
+restart. DNS statistics respect `log_queries`. Rank storage admits at most
+10,000 distinct domains and 4,096 clients while global totals keep counting.
+Allowed means a locally permitted DNS request, including static answers and
+redirects, and is not a promise of successful HTTP traffic. Upstream DNS
+resolution failures are counted separately.
+
+`GET /settings` reads `blocking-enabled`. `POST /settings` accepts a JSON boolean
+for that field and persists it. Disabled blocking skips blocklists and
+blackhole rules, leaving other DNS answers and proxy routing active. An exact
+`passthrough` rule overrides a blocklist for its domain. The dashboard and card
+use `dashboard-DOMAIN` IDs for editable exact allow/block rules. Remove a rule
+through the web UI to restore ordinary policy. `POST /cache/clear` empties the
+upstream answer cache, without resetting cache hit/miss counters.
+
+The `/events` feed emits sanitized DNS, proxy request, and proxy response
+summaries. Headers, bodies, URL credentials, and URL query strings are omitted.
+The legacy root WebSocket and listener-specific routes retain inspection data.
+Connections have bounded queues, ping/pong handling, and slow clients are
+disconnected to keep publishers from waiting on network writes.
+
+Install `sre/BlueberryProxy/custom_components/blueberry_proxy` for the HA card.
+Add the BlueberryProxy Dashboard integration using its local port 8055 URL.
+Then add `type: custom:blueberry-proxy-card` to a dashboard. Its module is
+registered automatically. HA relays reads and writes over authenticated
+WebSockets and permits these operations only for administrators. No direct
+browser-to-proxy access or CORS configuration is required for the card.
+
+Dashboard domain rules use priority 100 to resolve ties with existing exact
+rules for the same domain. Match type and suffix length retain precedence.

@@ -223,7 +223,7 @@
 (defn- handle-status [store up-store ex]
   (send-json ex 200
              {:name "blueberryProxy"
-              :version "0.1.0"
+              :version "0.2.0"
               :uptime-ms (- (System/currentTimeMillis) started-at)
               :stats (storage/stats store)
               :rules (count (storage/list-rules store))
@@ -245,6 +245,7 @@
   [{:keys [port bind store upstore log]
     :or {port 8054 bind "127.0.0.1"}}]
   (let [server (HttpServer/create (InetSocketAddress. ^String bind (int port)) 0)
+        pool (Executors/newFixedThreadPool 4)
         handler
         (reify HttpHandler
           (handle [_ ex]
@@ -264,6 +265,40 @@
                     (.set h "Access-Control-Allow-Methods" "GET, POST, DELETE, OPTIONS")
                     (.set h "Access-Control-Allow-Headers" "Content-Type")
                     (.sendResponseHeaders ex 204 -1))
+
+                  (and (= method "GET") (contains? #{"/" "/dashboard.js" "/dashboard.css"} path))
+                  (let [[resource ctype] (get {"/" ["public/index.html" "text/html; charset=utf-8"]
+                                               "/dashboard.js" ["public/dashboard.js" "text/javascript; charset=utf-8"]
+                                               "/dashboard.css" ["public/dashboard.css" "text/css; charset=utf-8"]} path)]
+                    (if-let [url (io/resource resource)]
+                      (with-open [in (io/input-stream url)]
+                        (let [bytes (.readAllBytes in)
+                              ingress (.getFirst (.getRequestHeaders ex) "X-Ingress-Path")
+                              bytes (if (and (= path "/") ingress
+                                             (re-matches #"/api/hassio_ingress/[A-Za-z0-9_-]+/?" ingress))
+                                      (.getBytes (str/replace (String. bytes utf8) "<head>"
+                                                             (str "<head><base href=\"" (str/replace ingress #"/$" "") "/\">")) utf8)
+                                      bytes)]
+                          (send-bytes ex 200 bytes ctype)))
+                      (send-json ex 404 {:error "dashboard resource missing"})))
+
+                  (and (= method "GET") (= path "/stats"))
+                  (send-json ex 200 (assoc (storage/dashboard-stats store)
+                                          :uptime-ms (- (System/currentTimeMillis) started-at)
+                                          :cache (upstreams/cache-stats upstore)))
+
+                  (= path "/settings")
+                  (case method
+                    "GET" (send-json ex 200 {:blocking-enabled (:blocking-enabled @store true)})
+                    "POST" (let [body (parse-body (read-body ex))]
+                             (if (instance? Boolean (:blocking-enabled body))
+                               (send-json ex 200 {:blocking-enabled (storage/set-blocking! store (:blocking-enabled body))})
+                               (send-json ex 400 {:error "blocking-enabled must be a boolean"})))
+                    (send-json ex 405 {:error "method not allowed"}))
+
+                  (and (= method "POST") (= path "/cache/clear"))
+                  (do (swap! upstore assoc :cache {})
+                      (send-json ex 200 {:cache (upstreams/cache-stats upstore)}))
 
                   (and (= method "GET") (= path "/status"))
                   (handle-status store upstore ex)
@@ -350,9 +385,9 @@
               (finally
                 (try (.close ex) (catch Exception _ nil))))))]
     (.createContext server "/" handler)
-    (.setExecutor server (Executors/newFixedThreadPool 4))
+    (.setExecutor server pool)
     (.start server)
     (when log (log {:event :admin-start :port (.getPort (.getAddress server))}))
     {:server server
      :port (.getPort (.getAddress server))
-     :stop (fn [] (.stop server 0))}))
+     :stop (fn [] (.stop server 0) (.shutdownNow pool))}))
