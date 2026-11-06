@@ -1,0 +1,140 @@
+name: BlueberryProxy
+version: 0.1.0
+slug: blueberry_proxy
+description: Home network DNS, blocklists, reverse proxy maps and device research tools
+url: https://git.crit.rip/BlueberryFaygo/BlueberryProxy
+arch:
+  - amd64
+  - aarch64
+boot: auto
+startup: application
+# the JVM is PID 1 and handles SIGTERM via its shutdown hook
+init: false
+# required so the proxy can answer LAN clients on port 53
+host_network: true
+options:
+  dns_port: 53
+  bind: 0.0.0.0
+  doh_port: 8053
+  admin_port: 8054
+  admin_bind: 127.0.0.1
+  proxy_port: 8080
+  proxy_tls_enabled: false
+  proxy_tls_keystore: /data/blueberry-proxy.p12
+  proxy_tls_password: ""
+  proxy_tls_self_signed: false
+  proxy_tls_common_name: blueberryProxy
+  proxy_tls_sans: []
+  websocket_port: 8055
+  dns_cache_enabled: true
+  dns_cache_max_entries: 10000
+  dns_cache_max_ttl: 86400
+  blocklist_refresh_hours: 24
+  blocklist_action: blackhole
+  data_dir: /data
+  log: true
+  log_queries: true
+  upstreams:
+    - name: cloudflare
+      protocol: udp
+      host: 1.1.1.1
+      port: 53
+    - name: google
+      protocol: udp
+      host: 8.8.8.8
+      port: 53
+  rules:
+    - id: myts-cloud
+      match_type: suffix
+      match: yunext.com
+      action: static
+      value: 192.168.1.10
+    - id: myts-finder
+      match_type: suffix
+      match: iotworkshop.com
+      action: static
+      value: 192.168.1.10
+    - id: myts-firmware
+      match_type: suffix
+      match: hengdagao-test.yunext.com
+      action: blackhole
+  proxy_maps: []
+  blocklists: []
+  ptr_records: []
+  transformers: []
+  proxy_listeners: []
+  proxy_mounts: []
+schema:
+  dns_port: port
+  bind: str
+  doh_port: port
+  admin_port: port
+  admin_bind: str
+  proxy_port: port
+  proxy_tls_enabled: bool
+  proxy_tls_keystore: str
+  proxy_tls_password: password
+  proxy_tls_self_signed: bool
+  proxy_tls_common_name: str
+  proxy_tls_sans:
+    - str
+  websocket_port: port
+  dns_cache_enabled: bool
+  dns_cache_max_entries: int
+  dns_cache_max_ttl: int
+  blocklist_refresh_hours: int
+  blocklist_action: match(blackhole|nxdomain)
+  data_dir: str
+  log: bool
+  log_queries: bool
+  upstreams:
+    - name: str
+      protocol: match(udp|tcp|https)
+      host: str
+      port: port
+  rules:
+    - id: str
+      match_type: match(exact|suffix|regex)
+      match: str
+      action: match(static|blackhole|redirect|upstream|passthrough)
+      value?: str
+      ttl?: int
+  proxy_maps:
+    - id?: str
+      host?: str
+      path?: str
+      target: str
+      enabled?: bool
+      websocket_listener?: str
+      request_header_transformer?: str
+      response_header_transformer?: str
+      request_body_transformer?: str
+      response_body_transformer?: str
+      request_script_transformer?: str
+      response_script_transformer?: str
+  blocklists:
+    - id?: str
+      url: str
+      enabled?: bool
+  ptr_records:
+    - id?: str
+      ip: str
+      hostname: str
+      ttl?: int
+  transformers:
+    - id?: str
+      type: str
+      script: str
+  proxy_listeners:
+    - id?: str
+      map_id: str
+      bind?: str
+      port: port
+      enabled?: bool
+      tls?: bool
+  proxy_mounts:
+    - id?: str
+      proxy_map_id: str
+      path: str
+      target: str
+      enabled?: bool
