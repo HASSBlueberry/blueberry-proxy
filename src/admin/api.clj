@@ -5,7 +5,9 @@
             [clojure.string :as str]
             [dns.upstream.upstreamStore :as upstreams]
             [dns.blocklists :as blocklists]
-            [storage.storage :as storage])
+            [storage.storage :as storage]
+            [uscan.core :as uscan]
+            [uscan.scope :as scope])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetAddress InetSocketAddress NetworkInterface]
            [java.nio.charset StandardCharsets]
@@ -183,13 +185,46 @@
                        :top-clients (storage/top-clients store 20)
                        :stats (storage/stats store)})))
 
-(defn- handle-scan [ex query]
+(defn- handle-scan [ex query runtime]
   (let [cidr (or (:cidr query) (get query "cidr"))
         timeout (try (Long/parseLong (str (or (:timeout query)
                                               (get query "timeout") "250")))
                      (catch Exception _ 250))
-        result (scan {:cidr cidr :timeout timeout :workers 32})]
-    (send-json ex 200 result)))
+        result (scan {:cidr cidr :timeout timeout :workers 32})
+        devices (when runtime (:devices (uscan/snapshot runtime)))]
+    (send-json ex 200 (assoc result :discoveries (vec devices)
+                            :arp (vec (distinct (concat (filter :mac devices) (:arp result))))))))
+
+(defn- handle-uscan [runtime store ex method path query]
+  (if-not runtime
+    (send-json ex 503 {:error "UScan is unavailable"})
+    (try
+      (case path
+        "/uscan" (if (= method "GET") (send-json ex 200 (uscan/snapshot runtime (if (:limit query) (scope/bounded-int (Long/parseLong (:limit query)) 65536 1 65536 "limit") 65536))) (send-json ex 405 {:error "method not allowed"}))
+        "/uscan/devices" (case method
+          "GET" (send-json ex 200 {:devices (:devices (uscan/snapshot runtime))})
+          "POST" (send-json ex 200 (uscan/import-devices! runtime (parse-body (read-body ex))))
+          (send-json ex 405 {:error "method not allowed"}))
+        "/uscan/scanners"
+        (case method
+          "GET" (send-json ex 200 {:scanners (uscan/scanners runtime) :kinds (sort uscan/kinds) :interfaces (scope/interfaces)})
+          "POST" (send-json ex 200 {:scanner (uscan/register! runtime (parse-body (read-body ex)))})
+          "DELETE" (let [id (:id query)]
+                     (when-not id (throw (ex-info "id is required" {})))
+                     (when (some #(= (:id %) id) uscan/builtins) (throw (ex-info "Disable built-in scanners instead of deleting them" {})))
+                     (storage/remove-uscan-scanner! store id)
+                     (send-json ex 200 {:removed id}))
+          (send-json ex 405 {:error "method not allowed"}))
+        "/uscan/jobs"
+        (case method
+          "GET" (if-let [id (:id query)]
+                  (if-let [job (uscan/job runtime id)] (send-json ex 200 job) (send-json ex 404 {:error "job not found"}))
+                  (send-json ex 200 {:jobs (:jobs (uscan/snapshot runtime))}))
+          "POST" (send-json ex 202 (uscan/start-job! runtime (or (parse-body (read-body ex)) {})))
+          "DELETE" (send-json ex 200 (uscan/cancel! runtime (:id query)))
+          (send-json ex 405 {:error "method not allowed"})))
+      (catch Exception error
+        (send-json ex 400 {:error (str (.getMessage error))})))))
 
 (defn- handle-ptr [store ex method query]
   (case method
@@ -223,7 +258,7 @@
 (defn- handle-status [store up-store ex]
   (send-json ex 200
              {:name "blueberryProxy"
-              :version "0.2.0"
+              :version "0.3.0"
               :uptime-ms (- (System/currentTimeMillis) started-at)
               :stats (storage/stats store)
               :rules (count (storage/list-rules store))
@@ -242,7 +277,7 @@
   "Start the admin HTTP API.
   opts: {:port :bind :store :upstore :log}
   Returns {:stop fn}."
-  [{:keys [port bind store upstore log]
+  [{:keys [port bind store upstore log uscan]
     :or {port 8054 bind "127.0.0.1"}}]
   (let [server (HttpServer/create (InetSocketAddress. ^String bind (int port)) 0)
         pool (Executors/newFixedThreadPool 4)
@@ -286,6 +321,9 @@
                   (send-json ex 200 (assoc (storage/dashboard-stats store)
                                           :uptime-ms (- (System/currentTimeMillis) started-at)
                                           :cache (upstreams/cache-stats upstore)))
+
+                  (contains? #{"/uscan" "/uscan/devices" "/uscan/scanners" "/uscan/jobs"} path)
+                  (handle-uscan uscan store ex method path query)
 
                   (= path "/settings")
                   (case method
@@ -371,7 +409,7 @@
                   (handle-queries store ex query)
 
                   (and (= method "GET") (= path "/scan"))
-                  (handle-scan ex query)
+                  (handle-scan ex query uscan)
 
                   (and (= method "GET") (= path "/health"))
                   (send-json ex 200 {:ok true})

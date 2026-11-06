@@ -14,7 +14,8 @@
             [xform.proxy :as proxy]
             [xform.graal :as graal]
             [xform.tls :as tls]
-            [xform.websocket :as websocket])
+            [xform.websocket :as websocket]
+            [uscan.core :as uscan])
   (:import [java.time Instant])
   (:gen-class))
 
@@ -384,6 +385,7 @@
                                             :http-port (:admin-port config)})
         publish (fn [event] ((:publish ws-listener) event) ((:publish ingress-listener) event))
         _ (alter-meta! store assoc :storage.storage/on-query publish)
+        uscan-runtime (uscan/start store publish)
         handler (make-handler {:store store :up-store up-store
                                :config config :log log})
         proxy-listener (proxy/start {:port (:proxy-port config)
@@ -410,10 +412,12 @@
                        :bind (:admin-bind config)
                        :store store
                        :upstore up-store
+                       :uscan uscan-runtime
                        :log log})
          proxy-listener
          ws-listener
          ingress-listener
+         uscan-runtime
          blocklist-scheduler]]
     (log {:event :start
           :dns (str (:bind config) ":" (:dns-port config))

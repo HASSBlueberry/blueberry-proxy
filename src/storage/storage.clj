@@ -9,7 +9,8 @@
            [java.nio.file.attribute FileAttribute]))
 
 (def default-state
-  {:rules []
+  {:uscan-scanners []
+   :rules []
    :proxy-maps []
    :proxy-listeners []
    :proxy-mounts []
@@ -250,3 +251,7 @@
   (swap! store assoc :blocking-enabled (boolean enabled))
   (persist-current! store)
   (:blocking-enabled @store))
+
+(defn list-uscan-scanners [store] (vec (:uscan-scanners @store)))
+(defn put-uscan-scanner! [store record] (put-record! store :uscan-scanners record "scanner-"))
+(defn remove-uscan-scanner! [store id] (remove-record! store :uscan-scanners id))

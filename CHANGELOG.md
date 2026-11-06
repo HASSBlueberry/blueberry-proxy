@@ -1,7 +1,7 @@
 # Change Log
 All notable changes to this project will be documented in this file. This change log follows the conventions of [keepachangelog.com](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.0.1]
 ### Added
 - IPv4 and IPv6 reverse DNS PTR record management through `/ptr`.
 - Scheduled and on-demand DNS blocklist updates with hosts, domain-per-line,
@@ -53,3 +53,7 @@ frontend integration and automatically registered management card. Query
 history now returns the latest retained entries first, and runtime statistics
 are excluded from saved configuration. WebSocket delivery uses bounded queues,
 control frames, and shared HTTP access for the dashboard.
+
+### App repository validation fix
+
+Removed the invalid fixed-port `webui` field. The dashboard remains available through Ingress. Generated app packages are validated before deployment, and repository metadata points to the published apps repository.

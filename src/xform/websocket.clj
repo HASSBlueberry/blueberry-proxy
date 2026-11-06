@@ -119,7 +119,7 @@
     (finally (swap! clients dissoc socket) (try (.close socket) (catch Exception _ nil)))))
 
 (defn event-summary [event]
-  (cond-> (assoc (select-keys event [:type :client :qname :qtype :action :blocked :rule :upstream :method :status :map :listener]) :ts (or (:ts event) (System/currentTimeMillis)))
+  (cond-> (assoc (select-keys event [:type :client :qname :qtype :action :blocked :rule :upstream :method :status :map :listener :ip :mac :hostname :protocols :services :ports :scanner :job_id :new_device :discoveries :active_scanner :results]) :ts (or (:ts event) (System/currentTimeMillis)))
     (:uri event) (assoc :uri (try (let [uri (URI/create (str (:uri event)))]
                                       (str (.getScheme uri) "://" (.getHost uri) (.getRawPath uri)))
                                  (catch Exception _ "[invalid URI]")))))

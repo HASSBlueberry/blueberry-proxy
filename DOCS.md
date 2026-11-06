@@ -192,3 +192,13 @@ browser-to-proxy access or CORS configuration is required for the card.
 
 Dashboard domain rules use priority 100 to resolve ties with existing exact
 rules for the same domain. Match type and suffix length retain precedence.
+
+## UScan discovery
+
+UScan runs bounded background discovery jobs using native mDNS/DNS-SD, WSD, ONVIF, ARP and TCP probes. The Avahi scanner uses `avahi-browse` if available and otherwise reports a native DNS-SD fallback. It does not require an Avahi daemon for the other scanners. Select persistent profiles and override CIDRs, ports, interfaces, duration, timeout and probe budgets from the dashboard. Scope defaults use physical LAN interfaces and their actual prefixes. Large scans exceeding configured budgets fail explicitly. IPv6 scanning is not implemented.
+
+`GET /uscan` returns interfaces, profiles, recent jobs and discovered devices. `POST /uscan/scanners` registers a profile with `id`, `kind`, `enabled`, `parameters`, and optional `script` for kind `graaljs`. `POST /uscan/jobs` accepts `scanner_ids` and `parameters`. Poll or cancel with `/uscan/jobs?id=JOB_ID` using GET or DELETE. `GET /uscan/devices` returns the full inventory. Administrators can import inventory through POST to that path with `source`, explicit `cidrs`, and up to 4096 `devices` carrying observed `ip`, `mac` and `hostname`. Every IP must fall inside the advertised CIDRs. Imported evidence remains distinct from active probe evidence.
+
+A GraalJS scanner implements `function scan(ctx)`. It can iterate `ctx.targets`, read `ctx.parameters`, use `ctx.tcp(ip, port)` and `ctx.udp(ip, port, hexPayload)`, and publish `ctx.emit({ip, mac, hostname, ports, evidence})`. Hosts and ports are constrained by the profile. Scripts have no Java, filesystem or native-thread access. Context cancellation enforces the job deadline. These are administrative APIs on the same trusted-LAN and Ingress management boundary as the proxy's other configuration APIs.
+
+The dashboard displays scan jobs, per-scanner failures and discovered devices. Discovery and scan events stream over `/events`. The Home Assistant integration maintains that connection while loaded and fires `blueberry_proxy_discovery` and `blueberry_proxy_scan` events, even when its card is closed. The card can start discovery. The legacy `/scan` response includes UScan evidence and fresh ARP records for existing integrations. Multicast discovery remains local to selected interfaces; explicit routed CIDRs do not create multicast forwarding.
