@@ -1,0 +1,18 @@
+{
+  "domain": "blueberry_proxy",
+  "name": "BlueberryProxy Dashboard",
+  "version": "0.1.0",
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "frontend"
+  ],
+  "codeowners": [
+    "@BlueberryFaygo"
+  ],
+  "documentation": "https://git.crit.rip/BlueberryFaygo/BlueberryFaygo/src/branch/main/sre/BlueberryProxy",
+  "iot_class": "local_push",
+  "integration_type": "service",
+  "requirements": [],
+  "issue_tracker": "https://git.crit.rip/BlueberryFaygo/BlueberryFaygo/issues"
+}
